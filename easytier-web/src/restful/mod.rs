@@ -1,6 +1,7 @@
 mod auth;
 pub(crate) mod captcha;
 mod central_network;
+pub(crate) mod mcp;
 mod network;
 pub(crate) mod oidc;
 mod rpc;
@@ -43,6 +44,7 @@ use crate::webhook::SharedWebhookConfig;
 struct Assets;
 
 pub struct RestfulServer {
+    mcp_options: mcp::McpOptions,
     bind_addr: SocketAddr,
     client_mgr: Arc<ClientManager>,
     central_service: Arc<CentralNetworkService>,
@@ -159,6 +161,7 @@ impl RestfulServer {
         assert!(client_mgr.is_running());
 
         Ok(RestfulServer {
+            mcp_options: mcp::McpOptions::default(),
             bind_addr,
             client_mgr,
             central_service,
@@ -265,6 +268,11 @@ impl RestfulServer {
     }
 
     #[allow(unused_mut)]
+    pub fn with_mcp_options(mut self, options: mcp::McpOptions) -> Self {
+        self.mcp_options = options;
+        self
+    }
+
     pub async fn start(
         mut self,
     ) -> Result<
@@ -274,6 +282,7 @@ impl RestfulServer {
         ),
         anyhow::Error,
     > {
+        self.mcp_options.validate()?;
         let listener = TcpListener::bind(self.bind_addr).await?;
 
         // Session layer.
@@ -340,13 +349,31 @@ impl RestfulServer {
         } else {
             central_network::CentralNetworkApi::build_route()
         };
-        let mut app = Router::new()
+        let api_routes = Router::new()
             .route("/api/v1/summary", get(Self::handle_get_summary))
             .route("/api/v1/console-info", get(Self::handle_get_console_info))
             .route("/api/v1/sessions", get(Self::handle_list_all_sessions))
             .merge(central_routes)
             .merge(NetworkApi::build_route())
-            .merge(rpc::router())
+            .merge(rpc::router());
+        // Dispatch MCP tools through the same handlers, state and ownership checks.
+        // This is an in-process router, not an HTTP request back to ourselves.
+        let management_api: Router = api_routes
+            .clone()
+            .route(
+                "/api/v1/generate-config",
+                post(Self::handle_generate_config),
+            )
+            .route("/api/v1/parse-config", post(Self::handle_parse_config))
+            .with_state(self.client_mgr.clone())
+            .layer(Extension(self.central_service.clone()))
+            .layer(Extension(ConsoleInfoConfig {
+                config_server_protocol: self.config_server_protocol.clone(),
+                config_server_port: self.config_server_port,
+                webhook_auth: self.webhook_config.has_external_endpoint(),
+            }));
+        let mcp_routes = mcp::router(management_api, self.mcp_options.clone());
+        let mut app = api_routes
             .route_layer(login_required!(Backend))
             .merge(auth::router().layer(Extension(self.feature_flags.clone())))
             .merge(oidc::router())
@@ -356,6 +383,7 @@ impl RestfulServer {
                 post(Self::handle_generate_config),
             )
             .route("/api/v1/parse-config", post(Self::handle_parse_config))
+            .merge(mcp_routes)
             .layer(Extension(self.central_service.clone()))
             .layer(Extension(self.oidc_config.clone()))
             .layer(Extension(ConsoleInfoConfig {
