@@ -175,6 +175,9 @@ struct Cli {
     api_host: Option<url::Url>,
 
     #[command(flatten)]
+    mcp: restful::mcp::McpOptions,
+
+    #[command(flatten)]
     feature_flags: FeatureFlags,
 
     #[command(flatten)]
@@ -469,6 +472,7 @@ async fn main() {
     )
     .await
     .unwrap()
+    .with_mcp_options(cli.mcp)
     .start()
     .await
     .unwrap();

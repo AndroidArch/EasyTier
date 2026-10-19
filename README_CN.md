@@ -343,3 +343,9 @@ EasyTier 在 [LGPL-3.0](https://github.com/EasyTier/EasyTier/blob/main/LICENSE) 
 <img src="assets/wechat.png" width="200">
 <img src="assets/alipay.png" width="200">
 </p>
+
+## 原生 MCP 管理接口
+
+EasyTier Web 支持在现有 API 端口提供原生 HTTP MCP 接口 `/mcp`。启用配置、16 个工具及权限说明见 [原生 MCP 文档](easytier-web/docs/mcp.md)。
+
+本 Fork 的分支、官方代码同步与发布验证流程见 [维护说明](easytier-web/docs/fork-maintenance.md)。
